@@ -1,0 +1,55 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>demo-test</title>
+<style>body{background:#111;color:#0f0;font:12px monospace;white-space:pre-wrap}video{width:320px;border:1px solid #333}</style>
+</head><body>
+<pre id="out">starting…</pre>
+<video id="v" muted autoplay playsinline></video>
+<script type="module">
+import { createDemoFeed } from './js/demo.js';
+
+const out = document.getElementById('out');
+const log = (s) => {
+  out.textContent += '\n' + s;
+  try { fetch('/__log?msg=' + encodeURIComponent(s)); } catch (e) {}
+};
+log('module loaded');
+
+// Test A: plain animated canvas -> captureStream -> video
+const c = document.createElement('canvas');
+c.width = 1280; c.height = 720;
+const ctx = c.getContext('2d');
+let n = 0;
+let last = performance.now();
+const drawA = (now) => {
+  const g = ctx.createLinearGradient(0, 0, 1280, 720);
+  g.addColorStop(0, '#334155'); g.addColorStop(1, '#0f172a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, 720);
+  ctx.fillStyle = '#22d3ee'; ctx.fillRect(100 + (n % 200), 100, 400, 300);
+  n++;
+  if (n % 30 === 0) log('A frame ' + n + ' ' + (now - last).toFixed(1) + 'ms');
+  last = now;
+  requestAnimationFrame(drawA);
+};
+requestAnimationFrame(drawA);
+
+const streamA = c.captureStream(30);
+const v = document.getElementById('v');
+v.srcObject = streamA;
+v.play().then(() => log('A playing')).catch((e) => log('A play error ' + e));
+setTimeout(() => log('A ready=' + v.readyState + ' size=' + v.videoWidth + 'x' + v.videoHeight), 800);
+
+// Test B: the real demo feed, after test A has warmed up
+setTimeout(() => {
+  log('B start');
+  try {
+    const feed = createDemoFeed();
+    log('B feed created');
+    v.srcObject = feed.stream;
+    v.play().then(() => log('B playing')).catch((e) => log('B play error ' + e));
+    setTimeout(() => log('B ready=' + v.readyState + ' size=' + v.videoWidth + 'x' + v.videoHeight), 800);
+  } catch (e) {
+    log('B error ' + e);
+  }
+}, 1500);
+</script>
+</body></html>
