@@ -2,7 +2,7 @@
    App shell is precached; the OpenCV.js vision engine is cached on first use
    so the app keeps working offline afterwards. */
 
-const VERSION = 'screengrab-v1';
+const VERSION = 'screengrab-v8';
 const SHELL = [
   './',
   './index.html',
@@ -45,16 +45,22 @@ self.addEventListener('activate', (event) => {
 
 async function networkFirst(request) {
   const cache = await caches.open(VERSION);
+  const fallback = async () =>
+    (await cache.match('./index.html')) ||
+    (await cache.match('./')) ||
+    new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
+
   try {
     const fresh = await fetch(request);
-    if (fresh && fresh.ok) cache.put('./index.html', fresh.clone());
-    return fresh;
+    if (fresh && fresh.ok) {
+      cache.put('./index.html', fresh.clone()).catch(() => {});
+      return fresh;
+    }
+    // A proxy or captive portal can answer with 5xx instead of failing the
+    // request; prefer the cached shell in that case.
+    return fallback();
   } catch {
-    return (
-      (await cache.match('./index.html')) ||
-      (await cache.match('./')) ||
-      new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } })
-    );
+    return fallback();
   }
 }
 

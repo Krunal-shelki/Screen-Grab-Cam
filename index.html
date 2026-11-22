@@ -36,6 +36,10 @@
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2.8v8.4"/><path d="M7.2 6.4a7.5 7.5 0 1 0 9.6 0"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11.5A8 8 0 1 0 17.7 17"/><path d="M20 4.5v7h-7"/></symbol>
   <symbol id="i-screen" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20.5h8"/><path d="M12 16.5v4"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20.5 11.6a8.1 8.1 0 0 1-8.1 8.1H7.2L3.5 22v-5.2a8.1 8.1 0 1 1 17 0z"/><circle cx="8.6" cy="11.5" r=".65" fill="currentColor" stroke="none"/><circle cx="12" cy="11.5" r=".65" fill="currentColor" stroke="none"/><circle cx="15.4" cy="11.5" r=".65" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3L10.5 13.5"/><path d="M21 3l-6.4 18-4.1-7.5L3 9.4z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.7 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.7h.08A1.7 1.7 0 0 0 10.1 3.14V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.1 4.7a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.3 9v.08a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 </svg>
 
 <div class="app" id="app">
@@ -89,6 +93,10 @@
       <svg class="icon big"><use href="#i-camera"/></svg>
       <p>Camera preview will appear here</p>
     </div>
+
+    <button class="chat-fab" id="chatFab" aria-label="Open AI screen assistant" aria-controls="chatPanel" aria-expanded="false" title="Ask AI about the screen">
+      <svg class="icon"><use href="#i-chat"/></svg>
+    </button>
   </main>
 
   <section class="sheet" id="sheet">
@@ -155,6 +163,9 @@
       <span>Screen output</span>
       <span class="mono" id="ovSize">—</span>
     </div>
+    <button class="btn icon-btn" id="ovChatBtn" aria-label="Ask AI about the screen" title="Ask AI">
+      <svg class="icon"><use href="#i-chat"/></svg>
+    </button>
     <button class="btn icon-btn" id="ovSnapBtn" aria-label="Save snapshot" disabled>
       <svg class="icon"><use href="#i-snap"/></svg>
     </button>
@@ -168,6 +179,65 @@
     <span class="ov-hint">Straightened, cropped and scaled from the camera feed.</span>
   </footer>
 </div>
+
+<section class="chat-panel" id="chatPanel" hidden aria-label="AI screen assistant">
+  <header class="chat-head">
+    <div class="chat-title">
+      <svg class="icon"><use href="#i-chat"/></svg>
+      <span>Screen assistant</span>
+    </div>
+    <button class="btn icon-btn" id="chatNewBtn" title="New chat" aria-label="New chat">
+      <svg class="icon"><use href="#i-plus"/></svg>
+    </button>
+    <button class="btn icon-btn" id="chatSettingsBtn" title="AI settings" aria-label="AI settings">
+      <svg class="icon"><use href="#i-gear"/></svg>
+    </button>
+    <button class="btn icon-btn" id="chatCloseBtn" title="Close" aria-label="Close chat">
+      <svg class="icon"><use href="#i-close"/></svg>
+    </button>
+  </header>
+
+  <div class="chat-body" id="chatBody">
+    <form class="chat-setup" id="chatSetup" hidden>
+      <p class="chat-setup-title">Connect a vision model</p>
+      <label>Provider
+        <select id="aiProvider">
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="custom">Custom / local</option>
+        </select>
+      </label>
+      <label>API key
+        <input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" />
+      </label>
+      <label>Model
+        <input id="aiModel" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-4o-mini" />
+      </label>
+      <label>API base URL
+        <input id="aiBase" type="url" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1" />
+      </label>
+      <p class="chat-note">Works with any OpenAI-compatible chat API. Use a vision-capable model. The key stays in this browser; screenshots are sent to the provider you choose.</p>
+      <div class="chat-setup-actions">
+        <button type="submit" class="btn primary" id="aiSaveBtn">Save</button>
+        <button type="button" class="btn" id="aiForgetBtn" hidden>Forget key</button>
+        <button type="button" class="btn" id="aiCancelBtn">Cancel</button>
+      </div>
+    </form>
+
+    <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+  </div>
+
+  <form class="chat-compose" id="chatForm">
+    <textarea class="chat-input" id="chatInput" rows="1" placeholder="Ask about the screen…" aria-label="Message" enterkeyhint="send"></textarea>
+    <button type="button" class="btn chat-shot" id="chatShotBtn" title="Send the current output frame" disabled>
+      <svg class="icon"><use href="#i-snap"/></svg>
+      <span>Screen</span>
+    </button>
+    <button type="submit" class="btn primary chat-send" id="chatSendBtn" aria-label="Send message">
+      <svg class="icon"><use href="#i-send"/></svg>
+    </button>
+  </form>
+</section>
 
 <div class="gate" id="gate">
   <div class="gate-card">
