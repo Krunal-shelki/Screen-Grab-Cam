@@ -2,7 +2,7 @@
   "id": "./",
   "name": "ScreenGrab — camera screen capture",
   "short_name": "ScreenGrab",
-  "description": "Point your camera at a monitor, TV or projector. ScreenGrab finds the screen, straightens it and gives you a clean cropped video feed.",
+  "description": "Point your camera at a monitor, TV or projector. ScreenGrab finds the screen, straightens it, copies its text with OCR and gives you a clean cropped video feed.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

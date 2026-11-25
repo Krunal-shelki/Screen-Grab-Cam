@@ -1,8 +1,11 @@
 /* ScreenGrab service worker.
-   App shell is precached; the OpenCV.js vision engine is cached on first use
-   so the app keeps working offline afterwards. */
+   The app shell is precached. OpenCV.js and Tesseract.js are cached on first
+   use so the app keeps working offline afterwards. */
 
-const VERSION = 'screengrab-v8';
+const VERSION = 'screengrab-v16';
+/* Third-party engines (OpenCV, Tesseract) live in a stable cache so app
+   updates do not force a 20 MB re-download. */
+const RUNTIME_CACHE = 'screengrab-runtime-v1';
 const SHELL = [
   './',
   './index.html',
@@ -10,6 +13,7 @@ const SHELL = [
   './js/app.js',
   './js/vision.js',
   './js/demo.js',
+  './js/ocr.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -18,6 +22,8 @@ const SHELL = [
   './icons/apple-touch-icon.png',
 ];
 const OPENCV_HOST = 'docs.opencv.org';
+/* Tesseract.js, its core wasm and the English traineddata all come from here. */
+const OCR_HOST = 'cdn.jsdelivr.net';
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -38,7 +44,9 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((key) => key !== VERSION).map((key) => caches.delete(key)));
+    await Promise.all(
+      keys.filter((key) => key !== VERSION && key !== RUNTIME_CACHE).map((key) => caches.delete(key))
+    );
     await self.clients.claim();
   })());
 });
@@ -79,7 +87,7 @@ async function staleWhileRevalidate(request) {
 }
 
 async function cacheFirst(request) {
-  const cache = await caches.open(VERSION);
+  const cache = await caches.open(RUNTIME_CACHE);
   const cached = await cache.match(request);
   if (cached) return cached;
   try {
@@ -89,7 +97,7 @@ async function cacheFirst(request) {
     }
     return response;
   } catch {
-    return new Response('Vision engine unavailable offline', { status: 503 });
+    return new Response('Asset unavailable offline', { status: 503 });
   }
 }
 
@@ -114,7 +122,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.hostname === OPENCV_HOST) {
+  if (url.hostname === OPENCV_HOST || url.hostname === OCR_HOST) {
     event.respondWith(cacheFirst(request));
   }
 });

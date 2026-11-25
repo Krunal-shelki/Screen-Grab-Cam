@@ -4,11 +4,12 @@
 
 ScreenGrab is a small, installable PWA that detects a screen in your camera feed,
 finds its four corners, and perspective-corrects it into a clean, horizontally
-and vertically aligned stream — with a picture-in-picture preview, snapshots,
-recording, and an optional AI vision assistant.
+and vertically aligned stream. The straightened output is the main view, with a
+live camera preview in the corner for aiming — plus one-tap text copying via
+OCR, recording, and an optional AI vision assistant.
 
 <p align="center">
-  <img src="docs/app.jpg" alt="ScreenGrab tracking a monitor, with the rectified output in the picture-in-picture card" width="760">
+  <img src="docs/app.jpg" alt="ScreenGrab showing the rectified screen as the main view, with the raw camera feed in a corner preview" width="760">
 </p>
 
 <p align="center">
@@ -16,17 +17,20 @@ recording, and an optional AI vision assistant.
   <img alt="No build step" src="https://img.shields.io/badge/build-none-2dd4bf?style=flat-square">
   <img alt="Vanilla JS" src="https://img.shields.io/badge/JavaScript-vanilla-f7df1e?style=flat-square&logo=javascript&logoColor=black">
   <img alt="OpenCV.js" src="https://img.shields.io/badge/OpenCV.js-4.10.0-5C3EE8?style=flat-square&logo=opencv&logoColor=white">
-  <img alt="No dependencies" src="https://img.shields.io/badge/dependencies-0-2dd4bf?style=flat-square">
+  <img alt="Tesseract.js" src="https://img.shields.io/badge/Tesseract.js-7.0.0-2dd4bf?style=flat-square">
+  <img alt="Zero npm dependencies" src="https://img.shields.io/badge/npm%20dependencies-0-2dd4bf?style=flat-square">
 </p>
 
 - **Automatic screen detection** — edge detection and quad scoring, no manual setup.
 - **Perspective rectification** — output is cropped to the screen and squared up.
+- **Output-first layout** — the rectified feed fills the screen; the raw camera sits in a corner preview you can expand.
 - **Phone first** — camera picker, rear camera by default, safe-area aware, landscape friendly.
 - **Fixed aspect options** — 16:9, 4:3, 21:9, 9:16, 3:4, 1:1 with letterboxing, no stretching.
-- **Snapshot & record** — PNG stills and video straight from the rectified canvas.
+- **Record** — video straight from the rectified canvas, no server.
+- **Copy text (OCR)** — read the screen and put its text on your clipboard.
 - **AI screen assistant** — send the rectified frame to any OpenAI-compatible vision model.
-- **Works offline** — service worker caches the app and the vision engine.
-- **Zero dependencies, zero build** — plain HTML, CSS and ES modules.
+- **Works offline** — service worker caches the app, the vision engine and the OCR engine.
+- **Zero npm dependencies, zero build** — plain HTML, CSS and ES modules; the two engines load from a CDN on demand.
 
 Video stays on your device. A screenshot is sent to an AI provider only when you
 explicitly press **Screen** in the assistant.
@@ -87,18 +91,39 @@ Screen** / **Install** to run it standalone.
 | **16:9 / 4:3 / 21:9 / 9:16 / 3:4 / 1:1** | Fixed output frame. The screen is letterboxed inside it without stretching. |
 | **Lock** | Stop tracking and keep the current corners. |
 | **Corners** | Drag the four corners by hand, then press **Done**. |
-| **Tap the preview** | In auto mode, tap any detected candidate to select and lock onto it. |
-| **Output view** | Fullscreen rectified output with snapshot/record buttons. |
-| **Snapshot** | Save the current rectified frame as a PNG. |
+| **Tap the camera preview** | In auto mode, tap any detected candidate to select and lock onto it. |
+| **Input preview** | The raw camera feed sits in the bottom-right corner. Tap the expand icon — or the camera button in the controls — to view it full-screen. |
+| **Text** | Copy the text on the screen to the clipboard using OCR. |
 | **Record** | Record the rectified output (WebM, or MP4 where the browser supports it). |
 | **Torch** | Shown when the active camera reports torch support. |
-| **Chat bubble** | Open the AI screen assistant (bottom-left of the preview, or from the output view). |
+| **Chat bubble** | Open the AI screen assistant (bottom-left of the output). |
 
 Detection runs about 11 times per second and the warp at up to 30 fps. Tracking
 is smoothed and only dropped after the screen has been missing for ~1.6 s.
 
 <p align="center">
-  <img src="docs/output.jpg" alt="Fullscreen rectified output view" width="640">
+  <img src="docs/input.jpg" alt="Full-screen camera input with the detected screen corners" width="640">
+</p>
+
+## Copy text from the screen
+
+Press **Text** in the main controls. ScreenGrab reads the current rectified frame
+with [Tesseract.js](https://tesseract.js.org/), copies the result to the
+clipboard, and offers a **Show** action in the toast. The text sheet lets you
+review, edit and re-copy what was recognised.
+
+- English (`eng`) traineddata, LSTM engine, automatic page segmentation.
+- Frames smaller than 1600 px are upscaled and converted to grayscale first,
+  which helps with small UI text.
+- If the browser blocks clipboard access — iOS can require a fresh tap — the
+  text sheet opens with a **Copy** button instead.
+- The OCR engine (~10 MB) downloads on first use and is cached by the service
+  worker, so later runs work offline.
+- Accuracy depends on resolution, focus and contrast. Filling the frame with
+  the screen and avoiding glare gives the best results.
+
+<p align="center">
+  <img src="docs/ocr.jpg" alt="Recognized text sheet with copied screen text" width="640">
 </p>
 
 ## AI screen assistant
@@ -134,19 +159,22 @@ The rectified canvas is exposed for automation or embedding:
 const stream = window.screenGrab.getStream();     // MediaStream, 30 fps
 const canvas = window.screenGrab.canvas;          // HTMLCanvasElement
 const blob   = await window.screenGrab.snapshot(); // PNG Blob (also downloads)
+window.screenGrab.copyText();                     // OCR the frame and copy it
 const state  = window.screenGrab.state;           // corners, mode, candidates, outW/outH…
 ```
 
 ## How it works
 
 ```text
-camera ──► detect: 640 px gray → blur → Canny → dilate → contours → quad
-                │
-                ▼
-        corners + temporal smoothing
-                │
-                ▼
-   warpPerspective ──► output canvas ──► PiP · fullscreen · PNG · video · AI
+camera ──┬─► input preview (corner or full-screen)
+         │
+         └─► detect: 640 px gray → blur → Canny → dilate → contours → quad
+                     │
+                     ▼
+             corners + temporal smoothing
+                     │
+                     ▼
+        warpPerspective ──► output canvas ──► main view · OCR · video · AI
 ```
 
 - **Capture** — `getUserMedia` with `facingMode: environment` by default, ideal
@@ -163,6 +191,9 @@ camera ──► detect: 640 px gray → blur → Canny → dilate → contours 
   with the crop rather than the whole frame.
 - **Stabilise** — exponential smoothing with hysteresis; a candidate is kept
   until it has been missing for 1.6 s.
+- **OCR** — the rectified canvas is upscaled to at most 1600 px, converted to
+  grayscale, and recognised with Tesseract.js (LSTM, PSM 3). The worker is
+  created once and reused.
 - **Assistant** — the chat panel captures the rectified canvas as a JPEG and
   sends it, with your question, to an OpenAI-compatible vision model over
   `fetch`.
@@ -173,13 +204,14 @@ loaded on demand and cached by the service worker.
 ## Project structure
 
 ```text
-index.html            markup, icon sprite, gate and output view
-styles.css            mobile-first layout, safe areas, PiP/output/chat styling
-js/app.js             camera lifecycle, UI, tracking loop, overlay, recording, AI chat
+index.html            markup, icon sprite, gate, output stage, input preview and text sheet
+styles.css            mobile-first layout, safe areas, output/input/chat/OCR styling
+js/app.js             camera lifecycle, UI, tracking loop, overlay, recording, OCR, AI chat
 js/vision.js          OpenCV loader, Detector, Warper, geometry and scoring
+js/ocr.js             lazy Tesseract.js loader, preprocessing and recognition
 js/demo.js            synthetic monitor feed
 manifest.webmanifest  PWA manifest
-sw.js                 service worker (app shell + OpenCV cache)
+sw.js                 service worker (app shell + OpenCV/OCR caches)
 icons/                generated PWA icons
 docs/                 README screenshots
 tools/make-icons.py   stdlib-only icon generator
@@ -195,12 +227,15 @@ python3 tools/make-icons.py
 
 - `manifest.webmanifest` provides standalone display mode and any/maskable icons.
 - `sw.js` precaches the app shell. Same-origin assets are served
-  stale-while-revalidate; OpenCV.js is cache-first after the first download.
+  stale-while-revalidate; OpenCV.js and Tesseract.js assets are cache-first
+  after the first download and live in a separate cache, so app updates do not
+  re-download them.
 - Bump `VERSION` in `sw.js` when shipping asset changes so old caches are
   replaced.
 
-The first load needs a network connection for OpenCV (~10 MB). After that the
-whole app works offline.
+The first load needs a network connection for OpenCV (~10 MB). The first click
+on **Text** needs it again for the OCR engine (~10 MB). After that the whole app
+works offline.
 
 ## Browser support
 
@@ -212,6 +247,8 @@ whole app works offline.
 - `MediaRecorder` produces WebM on Chromium/Firefox and MP4 where Safari
   supports it.
 - Wake lock is requested while the camera is running, where supported.
+- OCR runs locally in a Web Worker; the bundled model recognises English.
+  Clipboard writes may need a fresh tap in Safari — the text sheet covers that.
 
 ## Debugging
 
@@ -233,6 +270,8 @@ Query flags, useful when testing detection:
 - Real-device testing matters: detection thresholds were tuned against a
   synthetic feed and typical monitor footage, but glare, extreme angles and
   very dark screens are always harder.
+- OCR is best on crisp, high-contrast text; very small UI text may need a closer
+  camera position or a fixed 16:9 frame that fills more of the output.
 - The AI key is stored unencrypted in `localStorage`. Use a restricted key, and
   do not ship a shared key inside the app.
 

@@ -1,5 +1,6 @@
 import { loadOpenCV, Detector, Warper, pointInQuad } from './vision.js';
 import { createDemoFeed } from './demo.js';
+import { readText } from './ocr.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -31,12 +32,16 @@ const els = {
   hud: $('hud'),
   resBadge: $('resBadge'),
   toast: $('toast'),
+  toastText: $('toastText'),
+  toastAction: $('toastAction'),
   recBadge: $('recBadge'),
   recTime: $('recTime'),
-  pip: $('pip'),
-  pipTag: $('pipTag'),
+  stageMain: $('stageMain'),
+  inputPip: $('inputPip'),
+  inputTag: $('inputTag'),
+  inputExpandBtn: $('inputExpandBtn'),
+  inputCloseBtn: $('inputCloseBtn'),
   outputCanvas: $('outputCanvas'),
-  expandBtn: $('expandBtn'),
   stageEmpty: $('stageEmpty'),
   sheet: $('sheet'),
   cameraSelect: $('cameraSelect'),
@@ -46,14 +51,10 @@ const els = {
   lockBtn: $('lockBtn'),
   editBtn: $('editBtn'),
   recordBtn: $('recordBtn'),
-  snapBtn: $('snapBtn'),
-  outputBtn: $('outputBtn'),
-  outputView: $('outputView'),
-  outputSlot: $('outputSlot'),
-  closeOutputBtn: $('closeOutputBtn'),
-  ovSnapBtn: $('ovSnapBtn'),
-  ovRecordBtn: $('ovRecordBtn'),
-  ovSize: $('ovSize'),
+  ocrBtn: $('ocrBtn'),
+  ocrBtnLabel: $('ocrBtnLabel'),
+  inputToggleBtn: $('inputToggleBtn'),
+  outBadge: $('outBadge'),
   gate: $('gate'),
   gateStatus: $('gateStatus'),
   startBtn: $('startBtn'),
@@ -77,13 +78,19 @@ const els = {
   chatNewBtn: $('chatNewBtn'),
   chatSettingsBtn: $('chatSettingsBtn'),
   chatCloseBtn: $('chatCloseBtn'),
-  ovChatBtn: $('ovChatBtn'),
   aiProvider: $('aiProvider'),
   aiKey: $('aiKey'),
   aiModel: $('aiModel'),
   aiBase: $('aiBase'),
   aiForgetBtn: $('aiForgetBtn'),
   aiCancelBtn: $('aiCancelBtn'),
+  ocrSheet: $('ocrSheet'),
+  ocrBackdrop: $('ocrBackdrop'),
+  ocrText: $('ocrText'),
+  ocrMeta: $('ocrMeta'),
+  ocrCopyBtn: $('ocrCopyBtn'),
+  ocrDoneBtn: $('ocrDoneBtn'),
+  ocrCloseBtn: $('ocrCloseBtn'),
 };
 
 function dbg(msg) {
@@ -126,10 +133,12 @@ const state = {
   installPrompt: null,
   outW: 0,
   outH: 0,
-  outputOpen: false,
+  inputOpen: false,
   toastTimer: 0,
   lastStatus: '',
   lastRes: '',
+  ocrBusy: false,
+  lastOcr: null,
 };
 
 const detector = new Detector();
@@ -169,8 +178,22 @@ function setStatus(text, tone = 'idle') {
   els.status.dataset.tone = tone;
 }
 
-function toast(message, ms = 2200) {
-  els.toast.textContent = message;
+function toast(message, ms = 2200, action = null) {
+  els.toastText.textContent = message;
+  if (action && action.label && typeof action.run === 'function') {
+    els.toastAction.hidden = false;
+    els.toastAction.textContent = action.label;
+    els.toastAction.onclick = () => {
+      clearTimeout(state.toastTimer);
+      els.toast.classList.remove('show');
+      action.run();
+    };
+    els.toast.classList.add('has-action');
+  } else {
+    els.toastAction.hidden = true;
+    els.toastAction.onclick = null;
+    els.toast.classList.remove('has-action');
+  }
   els.toast.classList.add('show');
   clearTimeout(state.toastTimer);
   state.toastTimer = setTimeout(() => els.toast.classList.remove('show'), ms);
@@ -223,10 +246,16 @@ function updateControls() {
   els.lockBtn.disabled = !hasCorners || editing;
   els.editBtn.disabled = !ready;
   els.recordBtn.disabled = !hasCorners || !ready;
-  els.snapBtn.disabled = !hasCorners || !ready;
-  els.outputBtn.disabled = !hasCorners || !ready;
-  els.ovSnapBtn.disabled = !hasCorners || !ready;
-  els.ovRecordBtn.disabled = !hasCorners || !ready;
+  els.ocrBtn.disabled = !hasCorners || !ready || state.ocrBusy;
+  els.inputToggleBtn.disabled = !state.stream;
+  els.inputToggleBtn.dataset.active = state.inputOpen ? 'true' : 'false';
+  els.inputToggleBtn.setAttribute('aria-expanded', state.inputOpen ? 'true' : 'false');
+  const inputLabel = state.inputOpen ? 'Back to output' : 'Show camera input';
+  els.inputToggleBtn.title = inputLabel;
+  els.inputToggleBtn.setAttribute('aria-label', inputLabel);
+
+  els.ocrBtn.dataset.busy = state.ocrBusy ? 'true' : 'false';
+  if (!state.ocrBusy) els.ocrBtnLabel.textContent = 'Text';
 
   els.lockBtn.innerHTML = `<svg class="icon"><use href="#i-${locked ? 'unlock' : 'lock'}"/></svg><span>${locked ? 'Unlock' : 'Lock'}</span>`;
   els.lockBtn.dataset.active = locked ? 'true' : 'false';
@@ -243,8 +272,17 @@ function updateHud(force) {
   const text = vw && vh ? `${vw}×${vh}` : '—';
   if (force || text !== state.lastRes) {
     state.lastRes = text;
-    els.resBadge.textContent = text;
+    els.resBadge.textContent = vw && vh ? `IN ${text}` : '—';
+    els.inputTag.textContent = vw && vh ? `INPUT ${text}` : 'INPUT';
   }
+}
+
+function updateStage() {
+  const hasOutput = !!(state.outW && state.outH);
+  els.stageEmpty.hidden = hasOutput;
+  els.outBadge.hidden = !hasOutput || state.inputOpen;
+  els.resBadge.hidden = !state.inputOpen;
+  els.inputPip.hidden = !state.stream;
 }
 
 function updateTorchUI() {
@@ -342,10 +380,10 @@ function resetTracking() {
   state.outW = 0;
   state.outH = 0;
   warper.reset();
-  els.pip.hidden = true;
-  closeOutputView();
+  setInputOpen(false);
+  els.inputPip.hidden = !state.stream;
   els.stage.classList.remove('edit');
-  els.stageEmpty.hidden = !!state.stream;
+  updateStage();
   updateControls();
   drawOverlay();
 }
@@ -518,7 +556,6 @@ async function boot() {
   state.starting = false;
   els.gateStatus.textContent = '';
   els.gate.hidden = true;
-  els.stageEmpty.hidden = true;
   toast('Point the camera at a screen', 3000);
   if (!SKIP.cv) ensureOpenCV().catch(() => {});
 }
@@ -531,7 +568,6 @@ async function startDemo() {
   applyStream(state.demo.stream, 'demo');
   dbg('startDemo: applied');
   els.gate.hidden = true;
-  els.stageEmpty.hidden = true;
   if (!SKIP.cv) ensureOpenCV().catch(() => {});
   dbg('startDemo: end');
 }
@@ -656,8 +692,7 @@ function onCornersChanged(force) {
     state.outH = 0;
     warper.reset();
   }
-  els.pip.hidden = !state.corners;
-  els.stageEmpty.hidden = true;
+  updateStage();
   updateControls();
   drawOverlay();
 }
@@ -680,11 +715,9 @@ function renderWarp(force) {
   const changed = result.w !== state.outW || result.h !== state.outH;
   state.outW = result.w;
   state.outH = result.h;
-  els.pip.hidden = false;
-  els.stageEmpty.hidden = true;
   if (changed) {
-    els.pipTag.textContent = `OUTPUT ${result.w}×${result.h}`;
-    els.ovSize.textContent = `${result.w}×${result.h}`;
+    els.outBadge.textContent = `OUT ${result.w}×${result.h}`;
+    updateStage();
     updateControls();
   }
 }
@@ -703,7 +736,7 @@ function videoRect(width, height) {
 /* ------------------------------------------------------------------ */
 
 function drawOverlay() {
-  const rect = els.stage.getBoundingClientRect();
+  const rect = els.overlay.getBoundingClientRect();
   if (rect.width < 4 || rect.height < 4) return;
 
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -773,7 +806,7 @@ function drawOverlay() {
 /* ------------------------------------------------------------------ */
 
 function stagePoint(event) {
-  const rect = els.stage.getBoundingClientRect();
+  const rect = els.overlay.getBoundingClientRect();
   return {
     x: event.clientX - rect.left,
     y: event.clientY - rect.top,
@@ -850,6 +883,7 @@ function onPointerUp(event) {
   state.misses = 0;
   onCornersChanged(true);
   setMode('locked');
+  setInputOpen(false);
   renderWarp(true);
   toast('Screen selected — tap Unlock to track again', 2800);
 }
@@ -893,6 +927,7 @@ function toggleLock() {
 function toggleEdit() {
   if (state.mode === 'edit') {
     setMode('locked');
+    setInputOpen(false);
     renderWarp(true);
     toast('Corners applied');
     return;
@@ -903,6 +938,7 @@ function toggleEdit() {
     state.lastSeen = performance.now();
   }
   setMode('edit');
+  setInputOpen(true);
   onCornersChanged(true);
   renderWarp(true);
   toast('Drag the four corners to frame the screen', 3200);
@@ -918,22 +954,16 @@ function onAspectChange() {
 }
 
 /* ------------------------------------------------------------------ */
-/* output view                                                         */
+/* camera input view                                                   */
 /* ------------------------------------------------------------------ */
 
-function openOutputView() {
-  if (!state.outW) return;
-  state.outputOpen = true;
-  els.outputView.hidden = false;
-  els.outputSlot.appendChild(els.outputCanvas);
+function setInputOpen(open) {
+  state.inputOpen = !!open && !!state.stream;
+  els.stage.classList.toggle('input-open', state.inputOpen);
+  els.inputExpandBtn.setAttribute('aria-expanded', state.inputOpen ? 'true' : 'false');
+  updateStage();
   updateControls();
-}
-
-function closeOutputView() {
-  if (!state.outputOpen) return;
-  state.outputOpen = false;
-  els.outputView.hidden = true;
-  els.pip.insertBefore(els.outputCanvas, els.pip.firstChild);
+  drawOverlay();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1033,8 +1063,6 @@ function updateRecordUI() {
   const label = rec ? 'Stop' : 'Record';
   els.recordBtn.classList.toggle('recording', rec);
   els.recordBtn.innerHTML = `<svg class="icon"><use href="#i-${icon}"/></svg><span>${label}</span>`;
-  els.ovRecordBtn.classList.toggle('recording', rec);
-  els.ovRecordBtn.innerHTML = `<svg class="icon"><use href="#i-${icon}"/></svg><span>${label}</span>`;
   els.recBadge.hidden = !rec;
 }
 
@@ -1074,6 +1102,118 @@ function downloadBlob(blob, filename) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
   toast(`Saved ${filename}`, 2600);
+}
+
+/* ------------------------------------------------------------------ */
+/* copy text from the screen (OCR)                                     */
+/* ------------------------------------------------------------------ */
+
+function setOcrProgress(label, progress) {
+  const pct = progress > 0 && progress < 1 ? ` ${Math.round(progress * 100)}%` : '';
+  els.ocrBtnLabel.textContent = `${label}${pct}`;
+}
+
+async function copyToClipboard(text) {
+  if (!text) return false;
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {}
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+  document.body.appendChild(area);
+  area.select();
+  area.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  area.remove();
+  return ok;
+}
+
+let ocrReturnFocus = null;
+
+function openOcrSheet(text, trigger) {
+  const value = text || els.ocrText.value;
+  if (!value) return;
+  const source = trigger || document.activeElement;
+  ocrReturnFocus = source && source !== document.body ? source : els.ocrBtn;
+  els.ocrText.value = value;
+  els.ocrMeta.textContent = state.lastOcr
+    ? `${state.lastOcr.confidence}% confidence · ${value.split(/\s+/).filter(Boolean).length} words · ${value.length} characters`
+    : '';
+  els.ocrSheet.hidden = false;
+  els.ocrBackdrop.hidden = false;
+  requestAnimationFrame(() => {
+    els.ocrText.focus();
+    if (matchMedia('(pointer:fine)').matches) els.ocrText.select();
+  });
+}
+
+function closeOcrSheet() {
+  els.ocrSheet.hidden = true;
+  els.ocrBackdrop.hidden = true;
+  const target = ocrReturnFocus;
+  ocrReturnFocus = null;
+  if (target && document.contains(target) && !target.disabled) target.focus();
+}
+
+async function copyFromSheet() {
+  const text = els.ocrText.value.trim();
+  if (!text) {
+    toast('There is no text to copy');
+    return;
+  }
+  const ok = await copyToClipboard(text);
+  toast(ok ? 'Text copied' : 'Copy failed — select the text and copy it manually', ok ? 1800 : 3400);
+}
+
+async function copyScreenText() {
+  if (state.ocrBusy) return;
+  if (!state.cvReady || !state.corners) {
+    toast('Point the camera at a screen first');
+    return;
+  }
+  renderWarp(false);
+  const source = els.outputCanvas;
+  if (!source.width || !source.height) {
+    toast('No output frame available yet');
+    return;
+  }
+
+  state.ocrBusy = true;
+  updateControls();
+  setOcrProgress('Reading', 0);
+
+  try {
+    const result = await readText(source, {
+      onStatus: ({ label, progress }) => setOcrProgress(label, progress),
+    });
+    const text = result.text.trim();
+    if (!text) {
+      toast('No readable text found — fill the frame with the screen', 3400);
+      return;
+    }
+    state.lastOcr = result;
+    if (await copyToClipboard(text)) {
+      toast(`Copied ${text.length} characters`, 3000, {
+        label: 'Show',
+        run: () => openOcrSheet(text),
+      });
+    } else {
+      openOcrSheet(text);
+      toast('Tap Copy to put the text on your clipboard', 3400);
+    }
+  } catch (err) {
+    console.error('[ScreenGrab] ocr:', err);
+    toast((err && err.message) || 'Could not read the screen. Try again.', 4200);
+  } finally {
+    state.ocrBusy = false;
+    updateControls();
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1429,13 +1569,15 @@ function wireUI() {
   els.editBtn.addEventListener('click', toggleEdit);
 
   els.recordBtn.addEventListener('click', toggleRecording);
-  els.ovRecordBtn.addEventListener('click', toggleRecording);
-  els.snapBtn.addEventListener('click', takeSnapshot);
-  els.ovSnapBtn.addEventListener('click', takeSnapshot);
+  els.ocrBtn.addEventListener('click', copyScreenText);
+  els.ocrCopyBtn.addEventListener('click', copyFromSheet);
+  els.ocrDoneBtn.addEventListener('click', closeOcrSheet);
+  els.ocrCloseBtn.addEventListener('click', closeOcrSheet);
+  els.ocrBackdrop.addEventListener('click', closeOcrSheet);
 
-  els.expandBtn.addEventListener('click', openOutputView);
-  els.outputBtn.addEventListener('click', openOutputView);
-  els.closeOutputBtn.addEventListener('click', closeOutputView);
+  els.inputExpandBtn.addEventListener('click', () => setInputOpen(true));
+  els.inputCloseBtn.addEventListener('click', () => setInputOpen(false));
+  els.inputToggleBtn.addEventListener('click', () => setInputOpen(!state.inputOpen));
 
   els.bannerClose.addEventListener('click', hideBanner);
   els.installBtn.addEventListener('click', async () => {
@@ -1447,7 +1589,6 @@ function wireUI() {
   });
 
   els.chatFab.addEventListener('click', openChat);
-  els.ovChatBtn.addEventListener('click', openChat);
   els.chatCloseBtn.addEventListener('click', closeChat);
   els.chatNewBtn.addEventListener('click', () => {
     chat.messages = [];
@@ -1482,8 +1623,9 @@ function wireUI() {
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    if (!els.ocrSheet.hidden) { closeOcrSheet(); return; }
     if (!els.chatPanel.hidden) { closeChat(); return; }
-    if (!els.outputView.hidden) closeOutputView();
+    if (state.inputOpen) setInputOpen(false);
   });
 
   els.overlay.addEventListener('pointerdown', onPointerDown);
@@ -1498,7 +1640,9 @@ function wireUI() {
 
   window.addEventListener('resize', drawOverlay);
   if ('ResizeObserver' in window) {
-    new ResizeObserver(() => drawOverlay()).observe(els.stage);
+    const observer = new ResizeObserver(() => drawOverlay());
+    observer.observe(els.stage);
+    observer.observe(els.inputPip);
   }
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && state.running) requestWakeLock();
@@ -1535,6 +1679,7 @@ window.screenGrab = {
   get canvas() { return els.outputCanvas; },
   getStream: getOutputStream,
   snapshot: takeSnapshot,
+  copyText: copyScreenText,
   get state() { return state; },
 };
 
